@@ -1,6 +1,7 @@
 package com.lattiq.androidbridge
 
 import android.app.Notification
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Handler
@@ -19,6 +20,7 @@ class NotificationListener : NotificationListenerService() {
     private val hb = Handler(Looper.getMainLooper())
     private val heartbeat = object : Runnable {
         override fun run() {
+            BridgeClient.ensure()   // reconnect the LAN socket if it dropped
             val key = Prefs.key(this@NotificationListener)
             if (key.isNotEmpty()) {
                 runCatching { Crypto.encrypt(key, "{\"type\":\"ping\"}") }.getOrNull()
@@ -33,11 +35,38 @@ class NotificationListener : NotificationListenerService() {
         Discovery.start(applicationContext)
         if (Prefs.ip(this).isNotEmpty()) BridgeClient.configure(Prefs.ip(this), Prefs.port(this))
         hb.removeCallbacks(heartbeat); hb.post(heartbeat)
+        BridgeClient.onTextMessage = { blob -> handleFromMac(blob) }   // "open on phone" etc.
     }
 
     override fun onListenerDisconnected() {
         Discovery.stop()
         hb.removeCallbacks(heartbeat)
+        BridgeClient.onTextMessage = null
+    }
+
+    /** Mac→phone control message (decrypt, then act). Runs on a socket thread → hop to main. */
+    private fun handleFromMac(blob: String) {
+        val key = Prefs.key(this)
+        if (key.isEmpty()) return
+        val json = Crypto.decrypt(key, blob) ?: return
+        val o = runCatching { JSONObject(json) }.getOrNull() ?: return
+        if (o.optString("type") == "open") {
+            val notifKey = o.optString("key"); val pkg = o.optString("app")
+            hb.post { openOnPhone(notifKey, pkg) }
+        }
+    }
+
+    private fun openOnPhone(notifKey: String, pkg: String) {
+        val sbn = runCatching { activeNotifications?.firstOrNull { it.key == notifKey } }.getOrNull()
+        if (sbn != null) {
+            runCatching { sbn.notification.contentIntent?.send() }.onSuccess { return }
+        }
+        // dismissed / no intent → just launch the app
+        if (pkg.isNotEmpty()) {
+            packageManager.getLaunchIntentForPackage(pkg)?.let {
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(it)
+            }
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -62,6 +91,7 @@ class NotificationListener : NotificationListenerService() {
                 put("otp", otp ?: JSONObject.NULL)
                 put("time", System.currentTimeMillis())
                 put("icon", appIconBase64(sbn.packageName) ?: JSONObject.NULL)
+                put("key", sbn.key)   // to reopen this exact notification on the phone
             }
             val blob = Crypto.encrypt(keyB64, json.toString())
             Sender.send(this, blob)

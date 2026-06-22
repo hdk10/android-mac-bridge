@@ -1,11 +1,17 @@
 import Foundation
 import Network
 
-/// LAN WebSocket server (home fast path). Receives one base64 secretbox blob per WS message.
+/// LAN WebSocket server (home fast path). Receives one base64 secretbox blob per WS message,
+/// and can send control messages back down a live phone connection ("open on phone").
 final class LanServer {
     private var listener: NWListener?
     private let port: UInt16
     private let onBlob: (String) -> Void
+    private let lock = NSLock()
+    private var conns: [ObjectIdentifier: NWConnection] = [:]
+    private var active: NWConnection?   // the connection currently receiving (the live phone)
+
+    var onConnChange: ((Bool) -> Void)?
 
     init(port: UInt16, onBlob: @escaping (String) -> Void) {
         self.port = port
@@ -19,18 +25,52 @@ final class LanServer {
         params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
         listener = try? NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         listener?.newConnectionHandler = { [weak self] conn in
+            conn.stateUpdateHandler = { [weak self] state in
+                switch state {
+                case .ready: self?.add(conn)
+                case .failed, .cancelled: self?.remove(conn)
+                default: break
+                }
+            }
             conn.start(queue: .global())
             self?.receive(conn)
         }
         listener?.start(queue: .global())
     }
 
+    /// Send a text frame to the live phone connection (the one currently receiving).
+    func send(_ text: String) {
+        guard let data = text.data(using: .utf8) else { return }
+        let meta = NWProtocolWebSocket.Metadata(opcode: .text)
+        let ctx = NWConnection.ContentContext(identifier: "send", metadata: [meta])
+        lock.lock(); let target = active ?? conns.values.first; lock.unlock()
+        guard let c = target else { return }
+        c.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { _ in })
+    }
+
+    private func add(_ conn: NWConnection) {
+        lock.lock(); conns[ObjectIdentifier(conn)] = conn; let n = conns.count; lock.unlock()
+        if n == 1 { onConnChange?(true) }
+    }
+    private func remove(_ conn: NWConnection) {
+        lock.lock()
+        conns[ObjectIdentifier(conn)] = nil
+        if active === conn { active = nil }
+        let n = conns.count
+        lock.unlock()
+        FileHandle.standardError.write("LAN phone removed (now \(n))\n".data(using: .utf8)!)
+        if n == 0 { onConnChange?(false) }
+        conn.cancel()
+    }
+
     private func receive(_ conn: NWConnection) {
         conn.receiveMessage { [weak self] data, _, _, error in
+            guard let self else { return }
             if let data, let s = String(data: data, encoding: .utf8) {
-                self?.onBlob(s)
+                self.lock.lock(); self.active = conn; self.lock.unlock()  // this is the live socket
+                self.onBlob(s)
             }
-            if error == nil { self?.receive(conn) } else { conn.cancel() }
+            if error == nil { self.receive(conn) } else { self.remove(conn) }
         }
     }
 }

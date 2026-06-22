@@ -12,6 +12,7 @@ final class BridgeCore: ObservableObject {
     @Published var connected = false          // a paired phone has been heard from recently
     @Published var lastCopied: String? = nil
     @Published var silenced: Set<String> = []  // app packages the user muted
+    @Published var lanConnected = false        // a phone holds a LAN socket → "open on phone" works
 
     let config = Config.loadOrCreate()
     private let silencedURL = FileManager.default.homeDirectoryForCurrentUser
@@ -27,9 +28,11 @@ final class BridgeCore: ObservableObject {
 
     func start() {
         loadSilenced()
-        lan = LanServer(port: UInt16(Config.port)) { [weak self] blob in
+        let server = LanServer(port: UInt16(Config.port)) { [weak self] blob in
             Task { @MainActor in self?.ingest(blob, source: "LAN") }
         }
+        server.onConnChange = { [weak self] up in Task { @MainActor in self?.lanConnected = up } }
+        lan = server
         lan?.start()
 
         relay = RelayClient(
@@ -84,7 +87,8 @@ final class BridgeCore: ObservableObject {
             title: title, text: text,
             otp: (obj["otp"] as? String) ?? OTP.extract(title, text),
             date: Date(), source: source,
-            iconB64: obj["icon"] as? String
+            iconB64: obj["icon"] as? String,
+            notifKey: obj["key"] as? String
         )
         recent.insert(item, at: 0)
         if recent.count > 15 { recent.removeLast() }
@@ -116,6 +120,15 @@ final class BridgeCore: ObservableObject {
     }
 
     func clearRecent() { recent.removeAll() }
+
+    /// Ask the phone to open this notification (LAN only — uses the live phone socket).
+    func openOnPhone(_ item: NotifItem) {
+        guard lanConnected, let key = item.notifKey else { return }
+        let payload: [String: Any] = ["type": "open", "key": key, "app": item.app]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let blob = Crypto.seal(data, keyB64: config.key) else { return }
+        lan?.send(blob)
+    }
 
     func silence(_ app: String) {
         silenced.insert(app)

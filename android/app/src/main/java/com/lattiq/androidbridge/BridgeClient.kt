@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Single shared WebSocket to the Mac. Queues messages while disconnected and reconnects lazily. */
 object BridgeClient {
     private val client = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
+        .pingInterval(12, TimeUnit.SECONDS)   // detect a dead/stale Mac socket faster
         .build()
 
     @Volatile private var ws: WebSocket? = null
@@ -26,6 +26,14 @@ object BridgeClient {
     /** True when a live LAN socket exists — Sender uses this to pick LAN vs relay. */
     val isConnected: Boolean
         get() = ws != null
+
+    /** Set by the listener service to handle Mac→phone messages over the LAN socket. */
+    @Volatile var onTextMessage: ((String) -> Unit)? = null
+
+    /** Reopen the LAN socket if it dropped (called from the heartbeat). */
+    fun ensure() {
+        if (url.isNotEmpty() && ws == null) open()
+    }
 
     fun configure(macIp: String, port: Int = 8765) {
         val next = "ws://$macIp:$port"
@@ -47,6 +55,10 @@ object BridgeClient {
                 connecting.set(false)
                 status = "connected"
                 while (queue.isNotEmpty()) queue.poll()?.let { webSocket.send(it) }
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                onTextMessage?.invoke(text)   // Mac→phone control message (e.g. "open on phone")
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

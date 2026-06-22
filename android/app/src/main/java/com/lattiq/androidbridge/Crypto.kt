@@ -22,4 +22,19 @@ object Crypto {
         }
         return Base64.encodeToString(nonce + cipher, Base64.NO_WRAP)
     }
+
+    /** Decrypt a base64(nonce||cipher) blob → plaintext, or null. For Mac→phone control messages. */
+    fun decrypt(keyB64: String, blobB64: String): String? {
+        return try {
+            val key = Base64.decode(keyB64, Base64.DEFAULT)
+            val raw = Base64.decode(blobB64, Base64.DEFAULT)
+            val nonce = raw.copyOfRange(0, SecretBox.NONCEBYTES)
+            val cipher = raw.copyOfRange(SecretBox.NONCEBYTES, raw.size)
+            val msg = ByteArray(cipher.size - SecretBox.MACBYTES)
+            if (!ls.cryptoSecretBoxOpenEasy(msg, cipher, cipher.size.toLong(), nonce, key)) return null
+            String(msg, Charsets.UTF_8)
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

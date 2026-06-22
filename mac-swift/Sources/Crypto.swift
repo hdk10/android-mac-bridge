@@ -34,4 +34,16 @@ enum Crypto {
         crypto_secretbox_keygen(&k)
         return Data(k).base64EncodedString()
     }
+
+    /// Encrypt a message → base64(nonce || mac+cipher). For Mac→phone control messages.
+    static func seal(_ message: Data, keyB64: String) -> String? {
+        _ = ready
+        guard let key = Data(base64Encoded: keyB64), key.count == crypto_secretbox_keybytes() else { return nil }
+        var nonce = [UInt8](repeating: 0, count: crypto_secretbox_noncebytes())
+        randombytes_buf(&nonce, nonce.count)
+        let msg = [UInt8](message)
+        var cipher = [UInt8](repeating: 0, count: msg.count + crypto_secretbox_macbytes())
+        guard crypto_secretbox_easy(&cipher, msg, UInt64(msg.count), nonce, [UInt8](key)) == 0 else { return nil }
+        return Data(nonce + cipher).base64EncodedString()
+    }
 }

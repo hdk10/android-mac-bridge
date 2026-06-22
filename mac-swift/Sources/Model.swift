@@ -10,6 +10,7 @@ struct NotifItem: Identifiable {
     let date: Date
     let source: String      // "LAN" | "Relay"
     let iconB64: String?    // base64 PNG of the source app's icon (sent by the phone)
+    let notifKey: String?   // Android StatusBarNotification key — to reopen it on the phone
 
     var appLabel: String {
         Self.labels[app] ?? app.split(separator: ".").last.map(String.init) ?? "phone"

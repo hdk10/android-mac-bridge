@@ -138,49 +138,54 @@ private struct NotifCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             AppLogo(item: item)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(item.appLabel).font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(item.date, format: .dateTime.hour().minute())
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.appLabel).font(.subheadline.weight(.semibold))
                 if !item.title.isEmpty {
                     Text(item.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if !item.text.isEmpty {
-                    Text(item.text).font(.callout).lineLimit(3)
+                    Text(item.text).font(.callout).lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack(spacing: 6) {
+                // bottom row: time + OTP on the left, action icons on the right — never overlaps text
+                HStack(spacing: 8) {
+                    Text(item.date, format: .dateTime.hour().minute())
+                        .font(.caption2).foregroundStyle(.tertiary)
                     if let otp = item.otp {
                         Text("OTP \(otp)")
-                            .font(.callout.monospacedDigit().weight(.semibold))
-                            .padding(.horizontal, 8).padding(.vertical, 2)
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
                             .background(brand.opacity(0.14), in: Capsule())
                             .foregroundStyle(brand)
                     }
-                    Spacer()
-                    if isApps {
-                        Button { core.silence(item.app) } label: {
-                            Image(systemName: "bell.slash")
-                        }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
-                        .help("Silence \(item.appLabel)")
-                    }
-                    Button { core.copy(copyValue); flash() } label: {
-                        Image(systemName: copied ? "checkmark" : copyIcon)
-                            .foregroundStyle(copied ? brand : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(copyHelp)
+                    Spacer(minLength: 8)
+                    actions
                 }
-                .font(.system(size: 13))
-                .padding(.top, 2)
+                .padding(.top, 1)
             }
         }
         .padding(12)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
+    }
+
+    private var actions: some View {
+        HStack(spacing: 13) {
+            if core.lanConnected, item.notifKey != nil {
+                Button { core.openOnPhone(item) } label: { Image(systemName: "iphone.gen3") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Open on phone")
+            }
+            if isApps {
+                Button { core.silence(item.app) } label: { Image(systemName: "bell.slash") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Silence \(item.appLabel)")
+            }
+            Button { core.copy(copyValue); flash() } label: {
+                Image(systemName: copied ? "checkmark" : copyIcon)
+                    .foregroundStyle(copied ? brand : .secondary)
+            }
+            .buttonStyle(.plain).help(copyHelp)
+        }
+        .font(.system(size: 13))
     }
 
     private func flash() {

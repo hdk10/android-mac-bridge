@@ -43,15 +43,19 @@ object Discovery {
         }
     }
 
+    @Volatile private var lastHost: String? = null
+
     private fun resolve(mgr: NsdManager, service: NsdServiceInfo, room: String) {
         mgr.resolveService(service, object : NsdManager.ResolveListener {
             override fun onServiceResolved(info: NsdServiceInfo) {
                 val svcRoom = info.attributes["room"]?.let { String(it) } ?: ""
-                if (svcRoom != room) return  // a different Mac — ignore
+                if (svcRoom != room) return            // a different Mac — ignore
                 val host = info.host?.hostAddress ?: return
-                val port = info.port
-                Log.i(TAG, "nsd resolved Mac at $host:$port (room match)")
-                BridgeClient.configure(host, port)  // re-point LAN socket at current IP
+                if (host.contains(":")) return         // IPv4 only (skip IPv6 link-local)
+                if (host == lastHost) return           // already pointed here — don't churn the socket
+                lastHost = host
+                Log.i(TAG, "nsd resolved Mac at $host:${info.port} (room match)")
+                BridgeClient.configure(host, info.port)
             }
             override fun onResolveFailed(info: NsdServiceInfo, code: Int) {}
         })
