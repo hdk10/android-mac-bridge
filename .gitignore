@@ -1,0 +1,17 @@
+# Mac agent
+mac/venv/
+mac/__pycache__/
+*.pyc
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/*.iml
+*.apk
+*.keystore
+
+# misc
+.DS_Store
