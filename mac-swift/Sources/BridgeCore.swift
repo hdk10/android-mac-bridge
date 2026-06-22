@@ -8,11 +8,22 @@ import UserNotifications
 final class BridgeCore: ObservableObject {
     static let shared = BridgeCore()
 
+    /// A paired phone the Mac has heard from.
+    struct Phone: Identifiable { let id: String; var name: String; var lastSeen: Date }
+
     @Published var recent: [NotifItem] = []
-    @Published var connected = false          // a paired phone has been heard from recently
+    @Published var connected = false          // any phone present (drives the menu-bar icon)
+    @Published var phones: [Phone] = []        // all phones seen recently (multi-device)
     @Published var lastCopied: String? = nil
     @Published var silenced: Set<String> = []  // app packages the user muted
     @Published var lanConnected = false        // a phone holds a LAN socket → "open on phone" works
+
+    /// Phones considered live right now (heard from within the timeout).
+    var connectedPhones: [Phone] {
+        let now = Date()
+        return phones.filter { now.timeIntervalSince($0.lastSeen) < presenceTimeout }
+            .sorted { $0.name < $1.name }
+    }
 
     let config = Config.loadOrCreate()
     private let silencedURL = FileManager.default.homeDirectoryForCurrentUser
@@ -23,7 +34,6 @@ final class BridgeCore: ObservableObject {
     private let bonjour = Bonjour()
     private var seen = Set<String>()
     private var seenOrder: [String] = []
-    private var lastSeen: Date?               // last valid message from the phone
     private let presenceTimeout: TimeInterval = 90   // > 2 missed 30s heartbeats
 
     func start() {
@@ -52,11 +62,18 @@ final class BridgeCore: ObservableObject {
     }
 
     private func refreshPresence() {
-        if let ls = lastSeen, Date().timeIntervalSince(ls) < presenceTimeout {
-            connected = true
+        let now = Date()
+        phones.removeAll { now.timeIntervalSince($0.lastSeen) > 600 }  // forget after 10 min
+        connected = !connectedPhones.isEmpty
+    }
+
+    private func seenPhone(id: String, name: String) {
+        if let i = phones.firstIndex(where: { $0.id == id }) {
+            phones[i].lastSeen = Date(); phones[i].name = name
         } else {
-            connected = false
+            phones.append(Phone(id: id, name: name, lastSeen: Date()))
         }
+        connected = true
     }
 
     // MARK: - receive
@@ -66,11 +83,16 @@ final class BridgeCore: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
 
-        // Any valid (decryptable) message proves a paired phone is alive.
-        if obj["type"] as? String == "bye" {        // phone unpaired → drop presence now
-            lastSeen = nil; connected = false; return
+        let did = obj["did"] as? String ?? "phone"
+        let dname = obj["dname"] as? String ?? "Phone"
+
+        // Any valid (decryptable) message proves that phone is alive.
+        if obj["type"] as? String == "bye" {        // phone unpaired → drop it now
+            phones.removeAll { $0.id == did }
+            connected = !connectedPhones.isEmpty
+            return
         }
-        lastSeen = Date(); connected = true
+        seenPhone(id: did, name: dname)
         if obj["type"] as? String == "ping" { return }  // heartbeat / probe — don't show
         let app = obj["app"] as? String ?? "phone"
         if silenced.contains(app) { return }                  // user-muted app

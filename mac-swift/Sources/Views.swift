@@ -63,19 +63,36 @@ private struct Header: View {
             BoltBadge(size: 26)
             Text("Android Bridge").font(.headline)
             Spacer()
-            StatusPill(connected: core.connected)
+            StatusPill()
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
     }
 }
 
 private struct StatusPill: View {
-    let connected: Bool
+    @EnvironmentObject var core: BridgeCore
     var body: some View {
+        let live = core.connectedPhones
+        if live.count > 1 {
+            Menu {
+                ForEach(core.phones) { p in
+                    let on = live.contains { $0.id == p.id }
+                    Label(p.name, systemImage: on ? "circle.fill" : "circle")
+                }
+            } label: {
+                pill(dotGreen: true, text: "\(live.count) phones", chevron: true)
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+        } else {
+            pill(dotGreen: !live.isEmpty, text: live.first?.name ?? "Disconnected", chevron: false)
+        }
+    }
+
+    private func pill(dotGreen: Bool, text: String, chevron: Bool) -> some View {
         HStack(spacing: 6) {
-            Circle().fill(connected ? .green : .red).frame(width: 8, height: 8)
-            Text(connected ? "Connected" : "Disconnected")
-                .font(.caption).foregroundStyle(.secondary)
+            Circle().fill(dotGreen ? .green : .red).frame(width: 8, height: 8)
+            Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if chevron { Image(systemName: "chevron.down").font(.system(size: 8)).foregroundStyle(.tertiary) }
         }
         .padding(.horizontal, 9).padding(.vertical, 4)
         .background(.quaternary, in: Capsule())

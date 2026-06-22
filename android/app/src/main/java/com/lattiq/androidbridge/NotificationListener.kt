@@ -14,41 +14,68 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 
-/** Captures every posted notification and forwards it to the Mac (LAN or relay). */
+/** Captures every notification and broadcasts it (encrypted per Mac) to all paired Macs. */
 class NotificationListener : NotificationListenerService() {
 
     private val hb = Handler(Looper.getMainLooper())
     private val heartbeat = object : Runnable {
         override fun run() {
-            BridgeClient.ensure()   // reconnect the LAN socket if it dropped
-            val key = Prefs.key(this@NotificationListener)
-            if (key.isNotEmpty()) {
-                runCatching { Crypto.encrypt(key, "{\"type\":\"ping\"}") }.getOrNull()
-                    ?.let { Sender.send(this@NotificationListener, it) }
+            val ctx = this@NotificationListener
+            Links.configure(Prefs.macs(ctx))   // open/refresh links to every paired Mac
+            if (Prefs.isPaired(ctx)) {
+                val ping = JSONObject().apply {
+                    put("type", "ping")
+                    put("did", Prefs.deviceId(ctx)); put("dname", Prefs.deviceName(ctx))
+                }
+                Sender.broadcast(ctx, ping.toString())
             }
-            hb.postDelayed(this, 30_000)   // keeps the Mac's "Connected" presence alive
+            hb.postDelayed(this, 30_000)
         }
     }
 
     override fun onListenerConnected() {
-        // Keep the LAN socket pointed at the Mac's current IP even if DHCP changed it.
         Discovery.start(applicationContext)
-        if (Prefs.ip(this).isNotEmpty()) BridgeClient.configure(Prefs.ip(this), Prefs.port(this))
+        Links.configure(Prefs.macs(this))
+        Links.onTextMessage = { room, text -> handleFromMac(room, text) }
         hb.removeCallbacks(heartbeat); hb.post(heartbeat)
-        BridgeClient.onTextMessage = { blob -> handleFromMac(blob) }   // "open on phone" etc.
     }
 
     override fun onListenerDisconnected() {
         Discovery.stop()
         hb.removeCallbacks(heartbeat)
-        BridgeClient.onTextMessage = null
+        Links.onTextMessage = null
     }
 
-    /** Mac→phone control message (decrypt, then act). Runs on a socket thread → hop to main. */
-    private fun handleFromMac(blob: String) {
-        val key = Prefs.key(this)
-        if (key.isEmpty()) return
-        val json = Crypto.decrypt(key, blob) ?: return
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        val extras = sbn.notification.extras
+        val title = extras.getString(Notification.EXTRA_TITLE)
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        if (title.isNullOrBlank() && text.isNullOrBlank()) return
+        if (!Prefs.isPaired(this) || Prefs.paused(this)) return
+
+        try {
+            val otp = OtpExtractor.extract(title, text)
+            val json = JSONObject().apply {
+                put("id", UUID.randomUUID().toString())
+                put("app", sbn.packageName)
+                put("title", title ?: ""); put("text", text ?: "")
+                put("otp", otp ?: JSONObject.NULL)
+                put("time", System.currentTimeMillis())
+                put("icon", appIconBase64(sbn.packageName) ?: JSONObject.NULL)
+                put("key", sbn.key)
+                put("did", Prefs.deviceId(this@NotificationListener))
+                put("dname", Prefs.deviceName(this@NotificationListener))
+            }
+            Sender.broadcast(this, json.toString())   // encrypts per Mac + sends to all
+        } catch (e: Throwable) {
+            Log.e(TAG, "broadcast failed", e)
+        }
+    }
+
+    // --- Mac→phone control (per room/Mac) ---
+    private fun handleFromMac(room: String, blob: String) {
+        val mac = Prefs.macs(this).firstOrNull { it.room == room } ?: return
+        val json = Crypto.decrypt(mac.key, blob) ?: return
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         if (o.optString("type") == "open") {
             val notifKey = o.optString("key"); val pkg = o.optString("app")
@@ -61,7 +88,6 @@ class NotificationListener : NotificationListenerService() {
         if (sbn != null) {
             runCatching { sbn.notification.contentIntent?.send() }.onSuccess { return }
         }
-        // dismissed / no intent → just launch the app
         if (pkg.isNotEmpty()) {
             packageManager.getLaunchIntentForPackage(pkg)?.let {
                 it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(it)
@@ -69,52 +95,17 @@ class NotificationListener : NotificationListenerService() {
         }
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
-        val extras = sbn.notification.extras
-        val title = extras.getString(Notification.EXTRA_TITLE)
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-
-        // Skip ongoing/empty noise (music, charging, etc.)
-        if (title.isNullOrBlank() && text.isNullOrBlank()) return
-
-        val keyB64 = Prefs.key(this)
-        if (keyB64.isEmpty()) return            // not paired
-        if (Prefs.paused(this)) return          // forwarding paused by the user
-
-        try {
-            val otp = OtpExtractor.extract(title, text)
-            val json = JSONObject().apply {
-                put("id", UUID.randomUUID().toString())  // dedup across dual-send (LAN+relay)
-                put("app", sbn.packageName)
-                put("title", title ?: "")
-                put("text", text ?: "")
-                put("otp", otp ?: JSONObject.NULL)
-                put("time", System.currentTimeMillis())
-                put("icon", appIconBase64(sbn.packageName) ?: JSONObject.NULL)
-                put("key", sbn.key)   // to reopen this exact notification on the phone
-            }
-            val blob = Crypto.encrypt(keyB64, json.toString())
-            Sender.send(this, blob)
-        } catch (e: Throwable) {
-            Log.e(TAG, "send failed", e)
-        }
-    }
-
-    /** Source app's launcher icon as a small base64 PNG, cached per package. */
     private fun appIconBase64(pkg: String): String? {
         iconCache[pkg]?.let { return it }
         return try {
             val drawable = packageManager.getApplicationIcon(pkg)
             val size = 48
             val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            drawable.setBounds(0, 0, size, size)
-            drawable.draw(Canvas(bmp))
+            drawable.setBounds(0, 0, size, size); drawable.draw(Canvas(bmp))
             val baos = ByteArrayOutputStream()
             bmp.compress(Bitmap.CompressFormat.PNG, 100, baos)
             Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP).also { iconCache[pkg] = it }
-        } catch (e: Exception) {
-            null
-        }
+        } catch (e: Exception) { null }
     }
 
     companion object {

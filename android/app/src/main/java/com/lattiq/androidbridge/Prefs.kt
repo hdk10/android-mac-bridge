@@ -1,34 +1,56 @@
 package com.lattiq.androidbridge
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
+import org.json.JSONArray
+import java.util.UUID
 
-/** Central pairing config from the QR: LAN ip/port + secretbox key + relay room. */
+/** Paired Macs (multi-device) + this phone's identity. */
 object Prefs {
     private const val FILE = "bridge"
 
-    fun ip(c: Context): String = sp(c).getString("mac_ip", "") ?: ""
-    fun port(c: Context): Int = sp(c).getInt("port", 8765)
-    fun key(c: Context): String = sp(c).getString("key", "") ?: ""
-    fun room(c: Context): String = sp(c).getString("room", "") ?: ""
-    fun relay(c: Context): String = sp(c).getString("relay", "") ?: ""
-    fun isPaired(c: Context): Boolean = key(c).isNotEmpty() && room(c).isNotEmpty()
+    fun macs(c: Context): List<Mac> {
+        sp(c).getString("macs", null)?.let { return parse(it) }
+        // migrate a pre-multi single pairing into the list
+        val key = sp(c).getString("key", "") ?: ""
+        val room = sp(c).getString("room", "") ?: ""
+        if (key.isNotEmpty() && room.isNotEmpty()) {
+            val m = Mac(
+                id = room, name = sp(c).getString("mac_name", "Mac") ?: "Mac",
+                ip = sp(c).getString("mac_ip", "") ?: "", port = sp(c).getInt("port", 8765),
+                key = key, room = room, relay = sp(c).getString("relay", "") ?: ""
+            )
+            saveMacs(c, listOf(m))
+            return listOf(m)
+        }
+        return emptyList()
+    }
+
+    fun addMac(c: Context, mac: Mac) = saveMacs(c, macs(c).filter { it.id != mac.id } + mac)
+    fun removeMac(c: Context, id: String) = saveMacs(c, macs(c).filter { it.id != id })
+    fun clearMacs(c: Context) = saveMacs(c, emptyList())
+    fun isPaired(c: Context): Boolean = macs(c).isNotEmpty()
 
     fun paused(c: Context): Boolean = sp(c).getBoolean("paused", false)
     fun setPaused(c: Context, v: Boolean) = sp(c).edit().putBoolean("paused", v).apply()
 
-    fun save(c: Context, ip: String, port: Int, key: String, room: String, relay: String) {
-        sp(c).edit()
-            .putString("mac_ip", ip)
-            .putInt("port", port)
-            .putString("key", key)
-            .putString("room", room)
-            .putString("relay", relay)
-            .putBoolean("paused", false)   // a fresh pair resumes forwarding
-            .apply()
+    fun deviceId(c: Context): String {
+        var id = sp(c).getString("device_id", "") ?: ""
+        if (id.isEmpty()) { id = UUID.randomUUID().toString().take(12); sp(c).edit().putString("device_id", id).apply() }
+        return id
     }
 
-    /** Unpair: forget the Mac entirely. Requires a new QR scan to resume. */
-    fun clear(c: Context) = sp(c).edit().clear().apply()
+    fun deviceName(c: Context): String =
+        (Settings.Global.getString(c.contentResolver, "device_name")?.takeIf { it.isNotBlank() }) ?: Build.MODEL
+
+    private fun saveMacs(c: Context, list: List<Mac>) {
+        sp(c).edit().putString("macs", JSONArray(list.map { it.toJson() }).toString()).apply()
+    }
+    private fun parse(raw: String): List<Mac> {
+        val a = JSONArray(raw)
+        return (0 until a.length()).map { Mac.fromJson(a.getJSONObject(it)) }
+    }
 
     private fun sp(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 }

@@ -6,10 +6,8 @@ import android.net.nsd.NsdServiceInfo
 import android.util.Log
 
 /**
- * Bonjour/mDNS discovery of the Mac's LAN service. Lets the phone re-find the
- * Mac's CURRENT IP after a DHCP change without re-scanning the QR. Only adopts
- * a service whose TXT `room` matches our paired room (so we connect to the right
- * Mac, never someone else's).
+ * Bonjour/mDNS discovery of paired Macs on the LAN. Re-points a Mac's link at its CURRENT IP
+ * after a DHCP change (matched by the TXT `room`), so no re-scan is needed.
  */
 object Discovery {
     private const val TYPE = "_androidbridge._tcp."
@@ -17,16 +15,18 @@ object Discovery {
 
     private var nsd: NsdManager? = null
     private var discovery: NsdManager.DiscoveryListener? = null
+    private var appContext: Context? = null
+    private val lastHost = HashMap<String, String>()   // room -> last host
 
     fun start(c: Context) {
-        if (nsd != null) return  // already running
+        if (nsd != null) return
+        appContext = c.applicationContext
         val mgr = c.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
-        val room = Prefs.room(c)
-        if (room.isEmpty()) return  // not paired
+        if (Prefs.macs(c).isEmpty()) return
 
         val listener = object : NsdManager.DiscoveryListener {
             override fun onServiceFound(service: NsdServiceInfo) {
-                if (service.serviceType.contains("_androidbridge")) resolve(mgr, service, room)
+                if (service.serviceType.contains("_androidbridge")) resolve(mgr, service)
             }
             override fun onServiceLost(service: NsdServiceInfo) {}
             override fun onDiscoveryStarted(t: String) {}
@@ -43,19 +43,18 @@ object Discovery {
         }
     }
 
-    @Volatile private var lastHost: String? = null
-
-    private fun resolve(mgr: NsdManager, service: NsdServiceInfo, room: String) {
+    private fun resolve(mgr: NsdManager, service: NsdServiceInfo) {
         mgr.resolveService(service, object : NsdManager.ResolveListener {
             override fun onServiceResolved(info: NsdServiceInfo) {
-                val svcRoom = info.attributes["room"]?.let { String(it) } ?: ""
-                if (svcRoom != room) return            // a different Mac — ignore
+                val room = info.attributes["room"]?.let { String(it) } ?: return
+                val ctx = appContext ?: return
+                if (Prefs.macs(ctx).none { it.room == room }) return   // not one of ours
                 val host = info.host?.hostAddress ?: return
-                if (host.contains(":")) return         // IPv4 only (skip IPv6 link-local)
-                if (host == lastHost) return           // already pointed here — don't churn the socket
-                lastHost = host
-                Log.i(TAG, "nsd resolved Mac at $host:${info.port} (room match)")
-                BridgeClient.configure(host, info.port)
+                if (host.contains(":")) return                          // IPv4 only
+                if (lastHost[room] == host) return                      // no change → don't churn
+                lastHost[room] = host
+                Log.i(TAG, "nsd resolved $room at $host:${info.port}")
+                Links.updateIp(room, host, info.port)
             }
             override fun onResolveFailed(info: NsdServiceInfo, code: Int) {}
         })

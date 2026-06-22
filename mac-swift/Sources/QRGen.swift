@@ -3,10 +3,13 @@ import CoreImage
 
 /// Pairing QR — encodes {v:2, key, room, relay, ip, port} as JSON.
 enum QRGen {
+    static func macName() -> String { Host.current().localizedName ?? "Mac" }
+
     static func payload(config: Config) -> String {
         let dict: [String: Any] = [
             "v": 2, "key": config.key, "room": config.room,
             "relay": Config.relayBase, "ip": lanIPv4(), "port": Config.port,
+            "name": macName(),
         ]
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data()
         return String(data: data, encoding: .utf8) ?? ""

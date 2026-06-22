@@ -82,10 +82,12 @@ class ScannerActivity : AppCompatActivity() {
             val key = j.getString("key")        // required — secretbox key
             val room = j.getString("room")      // required — relay room
             val relay = j.optString("relay", "")
-            Prefs.save(this, ip, port, key, room, relay)
-            if (ip.isNotEmpty()) BridgeClient.configure(ip, port)
+            val name = j.optString("name", "Mac")
+            val mac = Mac(id = room, name = name, ip = ip, port = port, key = key, room = room, relay = relay)
+            Prefs.addMac(this, mac)
+            Links.ensure(mac)
             runOnUiThread {
-                Toast.makeText(this, "Paired ✓", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Paired with $name ✓", Toast.LENGTH_LONG).show()
                 setResult(RESULT_OK); finish()
             }
         } catch (e: Exception) {
