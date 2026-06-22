@@ -6,24 +6,52 @@ Click the menu-bar icon to see recent notifications; each expands to actions
 (Copy OTP / Copy message). A banner is posted on arrival so you notice it when
 the phone is away.
 
-Set TOKEN to match the Android app.
+Pairing: a persistent random token is generated on first run and stored in
+~/.androidbridge/config.json. "Pair phone" renders a QR (ip + port + token);
+the Android app scans it to configure itself — no USB, no manual IP entry.
 """
 import asyncio
 import json
+import os
 import re
+import secrets
 import socket
 import subprocess
 import threading
 from collections import deque
 from functools import partial
+from pathlib import Path
 
 import pyperclip
+import qrcode
 import rumps
 import websockets
 
 PORT = 8765
-TOKEN = "change-me-shared-secret"  # MUST match android BridgeClient token
 MAX_RECENT = 15
+
+CONFIG_DIR = Path.home() / ".androidbridge"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+QR_PATH = CONFIG_DIR / "pair_qr.png"
+
+
+def load_or_create_token() -> str:
+    """Persistent per-install token. Generated once, reused across restarts."""
+    try:
+        if CONFIG_PATH.exists():
+            tok = json.loads(CONFIG_PATH.read_text()).get("token")
+            if tok:
+                return tok
+    except (OSError, json.JSONDecodeError):
+        pass
+    tok = secrets.token_hex(16)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps({"token": tok}, indent=2))
+    os.chmod(CONFIG_PATH, 0o600)
+    return tok
+
+
+TOKEN = load_or_create_token()
 
 OTP_RE = re.compile(r"\b(\d{4,8})\b")
 OTP_HINTS = ("otp", "code", "verification", "verify", "password",
@@ -80,6 +108,8 @@ class Bridge(rumps.App):
         self.ip = lan_ip()
         self.recent: deque = deque(maxlen=MAX_RECENT)   # newest first
         self.inbox: deque = deque()                     # thread-safe handoff from WS thread
+        self._qr_cache_key = None                       # (ip, token) the cached QR was built for
+        self._qr_image_obj = None                       # cached NSImage of the QR
         self._build_menu()
         # drain the WS inbox on the main thread (rumps menu edits must be main-thread)
         rumps.Timer(self._drain, 1).start()
@@ -98,8 +128,38 @@ class Bridge(rumps.App):
                 self.menu.add(self._notif_item(n))
 
         self.menu.add(rumps.separator)
+        self.menu.add(self._pair_item())
         self.menu.add(rumps.MenuItem("Clear recent", callback=self._clear))
         self.menu.add(rumps.MenuItem("Quit", callback=rumps.quit_application))
+
+    def _pair_item(self) -> rumps.MenuItem:
+        """'Pair phone' parent; hovering shows the QR inline in the submenu."""
+        parent = rumps.MenuItem("📱 Pair phone")
+        qr = rumps.MenuItem("")
+        qr._menuitem.setImage_(self._qr_image())            # QR drawn inside the menu
+        parent.add(qr)
+        parent.add(rumps.MenuItem(f"{self.ip}:{PORT} · open Mac Bridge → Scan QR"))
+        return parent
+
+    def _qr_image(self):
+        """NSImage of the pairing QR, cached per (ip, token)."""
+        from AppKit import NSImage
+        from Foundation import NSMakeSize
+        ip = lan_ip()
+        key = (ip, TOKEN)
+        if self._qr_cache_key == key and self._qr_image_obj is not None:
+            return self._qr_image_obj
+        self.ip = ip
+        payload = json.dumps({"v": 1, "ip": ip, "port": PORT, "token": TOKEN})
+        img = qrcode.make(payload)
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(QR_PATH, "wb") as f:
+            img.save(f)
+        nsimg = NSImage.alloc().initWithContentsOfFile_(str(QR_PATH))
+        nsimg.setSize_(NSMakeSize(240, 240))
+        self._qr_cache_key = key
+        self._qr_image_obj = nsimg
+        return nsimg
 
     def _notif_item(self, n: dict) -> rumps.MenuItem:
         otp = n.get("otp")

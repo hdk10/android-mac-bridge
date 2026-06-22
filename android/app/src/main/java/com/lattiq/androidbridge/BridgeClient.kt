@@ -24,7 +24,11 @@ object BridgeClient {
         private set
 
     fun configure(macIp: String, port: Int = 8765) {
-        url = "ws://$macIp:$port"
+        val next = "ws://$macIp:$port"
+        if (next != url) {           // endpoint changed (re-pair) → drop stale socket
+            ws?.cancel(); ws = null
+        }
+        url = next
         open()
     }
 

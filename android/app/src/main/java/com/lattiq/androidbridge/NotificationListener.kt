@@ -18,8 +18,9 @@ class NotificationListener : NotificationListenerService() {
 
         val otp = OtpExtractor.extract(title, text)
 
+        val token = Prefs.token(this).ifEmpty { BuildConfig.BRIDGE_TOKEN }
         val json = JSONObject().apply {
-            put("token", BuildConfig.BRIDGE_TOKEN)
+            put("token", token)
             put("app", sbn.packageName)
             put("title", title ?: "")
             put("text", text ?: "")
