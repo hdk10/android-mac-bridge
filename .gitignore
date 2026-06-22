@@ -13,5 +13,13 @@ android/*.iml
 *.apk
 *.keystore
 
+# Swift Mac app
+mac-swift/build/
+mac-swift/.build/
+
 # misc
 .DS_Store
+
+# packaged downloads (keep these)
+!dist/MacBridge.apk
+!dist/AndroidBridge.dmg
