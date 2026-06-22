@@ -36,4 +36,26 @@ object RelayClient {
             }
         })
     }
+
+    /**
+     * Reachability probe (BLOCKING — call off the main thread). Returns true if the relay
+     * delivered the blob to a connected Mac (response delivered >= 1).
+     */
+    fun ping(relayBase: String, room: String, blob: String): Boolean {
+        if (relayBase.isEmpty() || room.isEmpty()) return false
+        val req = Request.Builder()
+            .url("https://$relayBase/pair/$room/notify")
+            .post(blob.toByteArray().toRequestBody())
+            .header("User-Agent", "android-bridge/1.0")
+            .build()
+        return try {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return false
+                val body = resp.body?.string() ?: return false
+                org.json.JSONObject(body).optInt("delivered", 0) >= 1
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
 }

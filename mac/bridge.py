@@ -29,6 +29,9 @@ import rumps
 import websockets
 from nacl.secret import SecretBox
 from nacl.utils import random as nacl_random
+from zeroconf import ServiceInfo, Zeroconf
+
+MDNS_TYPE = "_androidbridge._tcp.local."
 
 PORT = 8765
 MAX_RECENT = 15
@@ -138,10 +141,50 @@ class Bridge(rumps.App):
         self._relay_up = False                          # relay WS connected?
         self._relay_rendered = False                    # relay state last drawn in the menu
         self._last_src = None                           # "LAN" | "Relay" of last received notif
+        self._seen_ids: deque = deque()                 # dedup ids (LAN+relay dual-send)
+        self._seen_set: set = set()
+        self._zc = None
+        self._mdns_info = None
+        self._mdns_ip = None
         self._build_menu()
+        self._register_mdns()
         # drain the WS inbox on the main thread (rumps menu edits must be main-thread)
         rumps.Timer(self._drain, 1).start()
+        rumps.Timer(self._refresh_mdns, 15).start()     # re-advertise if the LAN IP changes
         threading.Thread(target=self._serve, daemon=True).start()
+
+    # --- mDNS / Bonjour: advertise so the phone finds us even if DHCP changes our IP ---
+    def _register_mdns(self) -> None:
+        try:
+            self._zc = Zeroconf()
+            self._mdns_ip = lan_ip()
+            self._mdns_info = ServiceInfo(
+                MDNS_TYPE,
+                f"MacBridge.{MDNS_TYPE}",
+                addresses=[socket.inet_aton(self._mdns_ip)],
+                port=PORT,
+                properties={"room": ROOM},
+            )
+            self._zc.register_service(self._mdns_info)
+        except Exception:
+            self._zc = None
+
+    def _refresh_mdns(self, _timer=None) -> None:
+        if self._zc is None:
+            return
+        ip = lan_ip()
+        if ip == self._mdns_ip:
+            return
+        try:  # IP changed (new network/DHCP) → re-advertise the new address
+            self._mdns_ip = ip
+            self._mdns_info = ServiceInfo(
+                MDNS_TYPE, f"MacBridge.{MDNS_TYPE}",
+                addresses=[socket.inet_aton(ip)], port=PORT,
+                properties={"room": ROOM},
+            )
+            self._zc.update_service(self._mdns_info)
+        except Exception:
+            pass
 
     # --- menu rendering (main thread only) ---
     def _build_menu(self) -> None:
@@ -282,6 +325,16 @@ class Bridge(rumps.App):
             await asyncio.sleep(5)
 
     def _on_notif(self, msg: dict, source: str = "LAN") -> None:
+        # dedup: dual-send means the same id can arrive over BOTH LAN and relay
+        mid = msg.get("id")
+        if mid:
+            if mid in self._seen_set:
+                return
+            self._seen_set.add(mid)
+            self._seen_ids.append(mid)
+            while len(self._seen_ids) > 300:
+                self._seen_set.discard(self._seen_ids.popleft())
+
         title = msg.get("title", "") or ""
         text = msg.get("text", "") or ""
         msg["_src"] = source

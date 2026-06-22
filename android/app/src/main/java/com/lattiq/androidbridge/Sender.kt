@@ -15,16 +15,18 @@ object Sender {
         private set
 
     fun send(c: Context, blob: String) {
-        if (BridgeClient.isConnected) {
-            lastPath = "LAN"
-            Log.i("ABridge", "send via LAN")
+        val lan = BridgeClient.isConnected
+        // Dual-send: when LAN looks up, send it AND the relay as a backstop. This
+        // covers the ~20s window where a half-open LAN socket still reads "connected"
+        // after a network switch — the relay copy always lands. Mac dedups by id.
+        if (lan) {
             BridgeClient.send(blob)
+            lastPath = "LAN"
         } else {
             lastPath = "Internet Relay"
-            val relay = Prefs.relay(c); val room = Prefs.room(c)
-            RelayClient.post(relay, room, blob)
-            Log.i("ABridge", "send via relay relay=$relay room=$room")
         }
+        RelayClient.post(Prefs.relay(c), Prefs.room(c), blob)
+        Log.i("ABridge", "send lan=$lan + relay (dedup by id)")
     }
 
     /** The channel the next notification would use right now. */

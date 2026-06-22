@@ -13,6 +13,9 @@ object Prefs {
     fun relay(c: Context): String = sp(c).getString("relay", "") ?: ""
     fun isPaired(c: Context): Boolean = key(c).isNotEmpty() && room(c).isNotEmpty()
 
+    fun paused(c: Context): Boolean = sp(c).getBoolean("paused", false)
+    fun setPaused(c: Context, v: Boolean) = sp(c).edit().putBoolean("paused", v).apply()
+
     fun save(c: Context, ip: String, port: Int, key: String, room: String, relay: String) {
         sp(c).edit()
             .putString("mac_ip", ip)
@@ -20,8 +23,12 @@ object Prefs {
             .putString("key", key)
             .putString("room", room)
             .putString("relay", relay)
+            .putBoolean("paused", false)   // a fresh pair resumes forwarding
             .apply()
     }
+
+    /** Unpair: forget the Mac entirely. Requires a new QR scan to resume. */
+    fun clear(c: Context) = sp(c).edit().clear().apply()
 
     private fun sp(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 }
