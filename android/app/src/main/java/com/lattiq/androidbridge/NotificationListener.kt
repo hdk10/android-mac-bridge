@@ -3,9 +3,10 @@ package com.lattiq.androidbridge
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import org.json.JSONObject
 
-/** Captures every posted notification and forwards it to the Mac over the LAN. */
+/** Captures every posted notification and forwards it to the Mac (LAN or relay). */
 class NotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -16,17 +17,26 @@ class NotificationListener : NotificationListenerService() {
         // Skip ongoing/empty noise (music, charging, etc.)
         if (title.isNullOrBlank() && text.isNullOrBlank()) return
 
-        val otp = OtpExtractor.extract(title, text)
+        val keyB64 = Prefs.key(this)
+        Log.i(TAG, "notif ${sbn.packageName} paired=${keyB64.isNotEmpty()}")
+        if (keyB64.isEmpty()) return  // not paired yet
 
-        val token = Prefs.token(this).ifEmpty { BuildConfig.BRIDGE_TOKEN }
-        val json = JSONObject().apply {
-            put("token", token)
-            put("app", sbn.packageName)
-            put("title", title ?: "")
-            put("text", text ?: "")
-            put("otp", otp ?: JSONObject.NULL)
-            put("time", System.currentTimeMillis())
+        try {
+            val otp = OtpExtractor.extract(title, text)
+            val json = JSONObject().apply {
+                put("app", sbn.packageName)
+                put("title", title ?: "")
+                put("text", text ?: "")
+                put("otp", otp ?: JSONObject.NULL)
+                put("time", System.currentTimeMillis())
+            }
+            val blob = Crypto.encrypt(keyB64, json.toString())
+            Log.i(TAG, "encrypted ${blob.length}b lanConnected=${BridgeClient.isConnected}")
+            Sender.send(this, blob)
+        } catch (e: Throwable) {
+            Log.e(TAG, "send failed", e)
         }
-        BridgeClient.send(json.toString())
     }
+
+    companion object { const val TAG = "ABridge" }
 }

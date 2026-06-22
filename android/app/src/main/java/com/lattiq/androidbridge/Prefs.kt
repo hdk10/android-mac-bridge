@@ -2,20 +2,24 @@ package com.lattiq.androidbridge
 
 import android.content.Context
 
-/** Central pairing config: Mac IP, port, shared token. Written by QR scan or manual entry. */
+/** Central pairing config from the QR: LAN ip/port + secretbox key + relay room. */
 object Prefs {
     private const val FILE = "bridge"
 
     fun ip(c: Context): String = sp(c).getString("mac_ip", "") ?: ""
     fun port(c: Context): Int = sp(c).getInt("port", 8765)
-    fun token(c: Context): String = sp(c).getString("token", "") ?: ""
-    fun isPaired(c: Context): Boolean = ip(c).isNotEmpty() && token(c).isNotEmpty()
+    fun key(c: Context): String = sp(c).getString("key", "") ?: ""
+    fun room(c: Context): String = sp(c).getString("room", "") ?: ""
+    fun relay(c: Context): String = sp(c).getString("relay", "") ?: ""
+    fun isPaired(c: Context): Boolean = key(c).isNotEmpty() && room(c).isNotEmpty()
 
-    fun save(c: Context, ip: String, port: Int, token: String) {
+    fun save(c: Context, ip: String, port: Int, key: String, room: String, relay: String) {
         sp(c).edit()
             .putString("mac_ip", ip)
             .putInt("port", port)
-            .putString("token", token)
+            .putString("key", key)
+            .putString("room", room)
+            .putString("relay", relay)
             .apply()
     }
 

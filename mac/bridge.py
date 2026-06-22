@@ -22,36 +22,61 @@ from collections import deque
 from functools import partial
 from pathlib import Path
 
+import base64
 import pyperclip
 import qrcode
 import rumps
 import websockets
+from nacl.secret import SecretBox
+from nacl.utils import random as nacl_random
 
 PORT = 8765
 MAX_RECENT = 15
+RELAY_BASE = "android-bridge-relay.hardikkatyarmal123.workers.dev"  # off-LAN forwarder
+NONCE_BYTES = 24  # XSalsa20-Poly1305 nonce (secretbox), matches libsodium on Android
 
 CONFIG_DIR = Path.home() / ".androidbridge"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 QR_PATH = CONFIG_DIR / "pair_qr.png"
 
 
-def load_or_create_token() -> str:
-    """Persistent per-install token. Generated once, reused across restarts."""
+def load_or_create_config() -> dict:
+    """Persistent pairing secret. Generated once, reused across restarts.
+
+    key  — 32-byte secretbox key (base64). Shared with the phone via the QR.
+    room — relay room id; the phone POSTs to /pair/<room>/notify off-LAN.
+    """
     try:
         if CONFIG_PATH.exists():
-            tok = json.loads(CONFIG_PATH.read_text()).get("token")
-            if tok:
-                return tok
+            cfg = json.loads(CONFIG_PATH.read_text())
+            if cfg.get("key") and cfg.get("room"):
+                return cfg
     except (OSError, json.JSONDecodeError):
         pass
-    tok = secrets.token_hex(16)
+    cfg = {
+        "key": base64.b64encode(nacl_random(SecretBox.KEY_SIZE)).decode(),
+        "room": secrets.token_urlsafe(16),
+    }
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps({"token": tok}, indent=2))
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
     os.chmod(CONFIG_PATH, 0o600)
-    return tok
+    return cfg
 
 
-TOKEN = load_or_create_token()
+_CFG = load_or_create_config()
+KEY_B64 = _CFG["key"]
+ROOM = _CFG["room"]
+BOX = SecretBox(base64.b64decode(KEY_B64))
+
+
+def decrypt(blob_b64: str):
+    """Open a base64(nonce||ciphertext) secretbox blob → notif dict, or None if forged/invalid."""
+    try:
+        raw = base64.b64decode(blob_b64)
+        nonce, ct = raw[:NONCE_BYTES], raw[NONCE_BYTES:]
+        return json.loads(BOX.decrypt(ct, nonce))
+    except Exception:
+        return None
 
 OTP_RE = re.compile(r"\b(\d{4,8})\b")
 OTP_HINTS = ("otp", "code", "verification", "verify", "password",
@@ -110,6 +135,9 @@ class Bridge(rumps.App):
         self.inbox: deque = deque()                     # thread-safe handoff from WS thread
         self._qr_cache_key = None                       # (ip, token) the cached QR was built for
         self._qr_image_obj = None                       # cached NSImage of the QR
+        self._relay_up = False                          # relay WS connected?
+        self._relay_rendered = False                    # relay state last drawn in the menu
+        self._last_src = None                           # "LAN" | "Relay" of last received notif
         self._build_menu()
         # drain the WS inbox on the main thread (rumps menu edits must be main-thread)
         rumps.Timer(self._drain, 1).start()
@@ -118,7 +146,11 @@ class Bridge(rumps.App):
     # --- menu rendering (main thread only) ---
     def _build_menu(self) -> None:
         self.menu.clear()
-        self.menu.add(rumps.MenuItem(f"Listening  {self.ip}:{PORT}"))
+        # single connection status line
+        if self._relay_up:
+            self.menu.add(rumps.MenuItem("🟢 Status: Connected"))
+        else:
+            self.menu.add(rumps.MenuItem("🔴 Status: Disconnected"))
         self.menu.add(rumps.separator)
 
         if not self.recent:
@@ -142,22 +174,25 @@ class Bridge(rumps.App):
         return parent
 
     def _qr_image(self):
-        """NSImage of the pairing QR, cached per (ip, token)."""
+        """NSImage of the pairing QR, cached per LAN ip (key/room are constant)."""
         from AppKit import NSImage
         from Foundation import NSMakeSize
         ip = lan_ip()
-        key = (ip, TOKEN)
-        if self._qr_cache_key == key and self._qr_image_obj is not None:
+        if self._qr_cache_key == ip and self._qr_image_obj is not None:
             return self._qr_image_obj
         self.ip = ip
-        payload = json.dumps({"v": 1, "ip": ip, "port": PORT, "token": TOKEN})
+        # v2: carries the secretbox key + relay coordinates AND the LAN locator
+        payload = json.dumps({
+            "v": 2, "key": KEY_B64, "room": ROOM,
+            "relay": RELAY_BASE, "ip": ip, "port": PORT,
+        })
         img = qrcode.make(payload)
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(QR_PATH, "wb") as f:
             img.save(f)
         nsimg = NSImage.alloc().initWithContentsOfFile_(str(QR_PATH))
         nsimg.setSize_(NSMakeSize(240, 240))
-        self._qr_cache_key = key
+        self._qr_cache_key = ip
         self._qr_image_obj = nsimg
         return nsimg
 
@@ -189,6 +224,9 @@ class Bridge(rumps.App):
         while self.inbox:
             self.recent.appendleft(self.inbox.popleft())
             changed = True
+        if self._relay_up != self._relay_rendered:   # relay dot flipped → redraw
+            self._relay_rendered = self._relay_up
+            changed = True
         if changed:
             self._build_menu()
 
@@ -200,22 +238,54 @@ class Bridge(rumps.App):
         loop.run_forever()
 
     async def _main(self) -> None:
+        # LAN server (home) + relay client (off-LAN) run concurrently
+        await asyncio.gather(self._lan_serve(), self._relay_loop())
+
+    async def _lan_serve(self) -> None:
         async with websockets.serve(self._handle, "0.0.0.0", PORT):
             await asyncio.Future()  # run forever
 
     async def _handle(self, ws, *_) -> None:
+        """LAN: phone sends a base64(nonce||ciphertext) blob per notification."""
         async for raw in ws:
-            try:
-                msg = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if msg.get("token") != TOKEN:
-                continue
-            self._on_notif(msg)
+            blob = raw if isinstance(raw, str) else raw.decode("utf-8", "ignore")
+            notif = decrypt(blob)
+            if notif:
+                self._on_notif(notif, "LAN")
 
-    def _on_notif(self, msg: dict) -> None:
+    async def _relay_loop(self) -> None:
+        """Off-LAN: subscribe to the Cloudflare relay room; decrypt forwarded blobs."""
+        url = f"wss://{RELAY_BASE}/pair/{ROOM}/listen"
+        while True:
+            try:
+                async with websockets.connect(url, open_timeout=15) as ws:
+                    self._relay_up = True
+                    async def keepalive():
+                        while True:
+                            await asyncio.sleep(30)
+                            await ws.send("ping")
+                    pinger = asyncio.ensure_future(keepalive())
+                    try:
+                        async for raw in ws:
+                            blob = raw if isinstance(raw, str) else raw.decode("utf-8", "ignore")
+                            if blob == "pong":
+                                continue
+                            notif = decrypt(blob)
+                            if notif:
+                                self._on_notif(notif, "Relay")
+                    finally:
+                        pinger.cancel()
+            except Exception:
+                pass  # relay down / network change → back off and retry
+            finally:
+                self._relay_up = False
+            await asyncio.sleep(5)
+
+    def _on_notif(self, msg: dict, source: str = "LAN") -> None:
         title = msg.get("title", "") or ""
         text = msg.get("text", "") or ""
+        msg["_src"] = source
+        self._last_src = source
         msg["otp"] = msg.get("otp") or extract_otp(text, title)
         try:  # lightweight receive log for debugging/verification
             with open("/tmp/androidbridge_rx.log", "a") as f:

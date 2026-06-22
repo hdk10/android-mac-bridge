@@ -77,13 +77,15 @@ class ScannerActivity : AppCompatActivity() {
         if (!handled.compareAndSet(false, true)) return  // first valid QR only
         try {
             val j = JSONObject(raw)
-            val ip = j.getString("ip")
+            val ip = j.optString("ip", "")
             val port = j.optInt("port", 8765)
-            val token = j.getString("token")
-            Prefs.save(this, ip, port, token)
-            BridgeClient.configure(ip, port)
+            val key = j.getString("key")        // required — secretbox key
+            val room = j.getString("room")      // required — relay room
+            val relay = j.optString("relay", "")
+            Prefs.save(this, ip, port, key, room, relay)
+            if (ip.isNotEmpty()) BridgeClient.configure(ip, port)
             runOnUiThread {
-                Toast.makeText(this, "Paired with $ip", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Paired ✓", Toast.LENGTH_LONG).show()
                 setResult(RESULT_OK); finish()
             }
         } catch (e: Exception) {

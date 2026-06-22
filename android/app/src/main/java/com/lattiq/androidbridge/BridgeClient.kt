@@ -23,6 +23,10 @@ object BridgeClient {
     @Volatile var status: String = "idle"
         private set
 
+    /** True when a live LAN socket exists — Sender uses this to pick LAN vs relay. */
+    val isConnected: Boolean
+        get() = ws != null
+
     fun configure(macIp: String, port: Int = 8765) {
         val next = "ws://$macIp:$port"
         if (next != url) {           // endpoint changed (re-pair) → drop stale socket
