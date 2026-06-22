@@ -3,6 +3,7 @@ import Foundation
 /// One received notification, shown as a card in the popover.
 struct NotifItem: Identifiable {
     let id: String
+    let did: String         // source phone's device id — for per-phone filtering
     let app: String
     let title: String
     let text: String

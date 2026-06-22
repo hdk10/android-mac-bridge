@@ -23,3 +23,7 @@ mac-swift/.build/
 # packaged downloads (keep these)
 !dist/MacBridge.apk
 !dist/AndroidBridge.dmg
+
+# python venv for tools
+tools/.venv/
+tools/__pycache__/

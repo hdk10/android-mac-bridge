@@ -14,6 +14,7 @@ final class BridgeCore: ObservableObject {
     @Published var recent: [NotifItem] = []
     @Published var connected = false          // any phone present (drives the menu-bar icon)
     @Published var phones: [Phone] = []        // all phones seen recently (multi-device)
+    @Published var selectedPhone: String? = nil  // nil = show all phones; else filter to this did
     @Published var lastCopied: String? = nil
     @Published var silenced: Set<String> = []  // app packages the user muted
     @Published var lanConnected = false        // a phone holds a LAN socket → "open on phone" works
@@ -64,6 +65,9 @@ final class BridgeCore: ObservableObject {
     private func refreshPresence() {
         let now = Date()
         phones.removeAll { now.timeIntervalSince($0.lastSeen) > 600 }  // forget after 10 min
+        if let sel = selectedPhone, !phones.contains(where: { $0.id == sel }) {
+            selectedPhone = phones.first?.id   // fall back to another phone, not "All"
+        }
         connected = !connectedPhones.isEmpty
     }
 
@@ -73,6 +77,7 @@ final class BridgeCore: ObservableObject {
         } else {
             phones.append(Phone(id: id, name: name, lastSeen: Date()))
         }
+        if selectedPhone == nil { selectedPhone = id }   // default to the first phone heard
         connected = true
     }
 
@@ -89,6 +94,7 @@ final class BridgeCore: ObservableObject {
         // Any valid (decryptable) message proves that phone is alive.
         if obj["type"] as? String == "bye" {        // phone unpaired → drop it now
             phones.removeAll { $0.id == did }
+            if selectedPhone == did { selectedPhone = phones.first?.id }
             connected = !connectedPhones.isEmpty
             return
         }
@@ -105,6 +111,7 @@ final class BridgeCore: ObservableObject {
         let text = obj["text"] as? String ?? ""
         let item = NotifItem(
             id: id,
+            did: did,
             app: app,
             title: title, text: text,
             otp: (obj["otp"] as? String) ?? OTP.extract(title, text),

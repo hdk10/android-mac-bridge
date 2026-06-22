@@ -71,18 +71,34 @@ private struct Header: View {
 
 private struct StatusPill: View {
     @EnvironmentObject var core: BridgeCore
+    @State private var showMenu = false
+
     var body: some View {
         let live = core.connectedPhones
         if live.count > 1 {
-            Menu {
-                ForEach(core.phones) { p in
-                    let on = live.contains { $0.id == p.id }
-                    Label(p.name, systemImage: on ? "circle.fill" : "circle")
-                }
-            } label: {
-                pill(dotGreen: true, text: "\(live.count) phones", chevron: true)
+            let selName = core.selectedPhone
+                .flatMap { id in core.phones.first { $0.id == id }?.name }
+            let selLive = core.selectedPhone.map { id in live.contains { $0.id == id } } ?? true
+            Button { showMenu.toggle() } label: {
+                pill(dotGreen: selLive, text: selName ?? "All phones", chevron: true)
             }
-            .menuStyle(.borderlessButton).fixedSize()
+            .buttonStyle(.plain)
+            .popover(isPresented: $showMenu, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(core.phones) { p in
+                        let on = live.contains { $0.id == p.id }
+                        PhoneRow(name: on ? p.name : "\(p.name) (offline)",
+                                 live: on, checked: core.selectedPhone == p.id) {
+                            core.selectedPhone = p.id; showMenu = false
+                        }
+                    }
+                    Divider().padding(.vertical, 2)
+                    PhoneRow(name: "All phones", live: true, checked: core.selectedPhone == nil) {
+                        core.selectedPhone = nil; showMenu = false
+                    }
+                }
+                .padding(6).frame(width: 200)
+            }
         } else {
             pill(dotGreen: !live.isEmpty, text: live.first?.name ?? "Disconnected", chevron: false)
         }
@@ -99,6 +115,34 @@ private struct StatusPill: View {
     }
 }
 
+/// One phone in the status popover: green/grey status dot · name · trailing checkmark.
+private struct PhoneRow: View {
+    let name: String
+    let live: Bool
+    let checked: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Circle().fill(live ? .green : .secondary).frame(width: 8, height: 8)
+                Text(name).lineLimit(1)
+                Spacer(minLength: 8)
+                if checked { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)) }
+            }
+            .font(.callout)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hover ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
+
 // MARK: - List
 
 private struct NotifList: View {
@@ -106,7 +150,10 @@ private struct NotifList: View {
     let tab: NotifTab
 
     private var items: [NotifItem] {
-        core.recent.filter { tab == .sms ? $0.isSMS : !$0.isSMS }
+        core.recent.filter {
+            (core.selectedPhone == nil || $0.did == core.selectedPhone)
+                && (tab == .sms ? $0.isSMS : !$0.isSMS)
+        }
     }
 
     var body: some View {
