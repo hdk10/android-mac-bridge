@@ -39,12 +39,24 @@ final class LanServer {
     }
 
     /// Send a text frame to the live phone connection (the one currently receiving).
+    /// Used for targeted control messages like "open on phone".
     func send(_ text: String) {
         guard let data = text.data(using: .utf8) else { return }
-        let meta = NWProtocolWebSocket.Metadata(opcode: .text)
-        let ctx = NWConnection.ContentContext(identifier: "send", metadata: [meta])
         lock.lock(); let target = active ?? conns.values.first; lock.unlock()
         guard let c = target else { return }
+        frame(data, to: c)
+    }
+
+    /// Broadcast a text frame to EVERY connected phone (clipboard fan-out → all paired phones).
+    func broadcast(_ text: String) {
+        guard let data = text.data(using: .utf8) else { return }
+        lock.lock(); let targets = Array(conns.values); lock.unlock()
+        for c in targets { frame(data, to: c) }
+    }
+
+    private func frame(_ data: Data, to c: NWConnection) {
+        let meta = NWProtocolWebSocket.Metadata(opcode: .text)
+        let ctx = NWConnection.ContentContext(identifier: "send", metadata: [meta])
         c.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { _ in })
     }
 
@@ -79,6 +91,7 @@ final class LanServer {
 /// keeps alive with pings, and auto-reconnects.
 final class RelayClient: NSObject, URLSessionWebSocketDelegate {
     private let url: URL
+    private let notifyURL: URL?    // POST endpoint to push a blob to the phone off-LAN
     private let onBlob: (String) -> Void
     private let onState: (Bool) -> Void
     private var task: URLSessionWebSocketTask?
@@ -86,11 +99,22 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
     private var stopped = false
 
     init?(base: String, room: String, onBlob: @escaping (String) -> Void, onState: @escaping (Bool) -> Void) {
-        guard let u = URL(string: "wss://\(base)/pair/\(room)/listen") else { return nil }
-        self.url = u; self.onBlob = onBlob; self.onState = onState
+        guard let u = URL(string: "wss://\(base)/pair/\(room)/listen?role=mac") else { return nil }
+        self.url = u
+        self.notifyURL = URL(string: "https://\(base)/pair/\(room)/notify?to=phone")
+        self.onBlob = onBlob; self.onState = onState
     }
 
     func start() { connect() }
+
+    /// Fire-and-forget POST of one base64 secretbox blob to the phone (off-LAN clip path).
+    func postClip(_ blob: String) {
+        guard let url = notifyURL else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.httpBody = blob.data(using: .utf8)
+        session.dataTask(with: req).resume()
+    }
 
     private func connect() {
         task = session.webSocketTask(with: url)

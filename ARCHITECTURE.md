@@ -16,7 +16,17 @@ through a Cloudflare relay that only ever sees ciphertext.
 - **Android Bridge** (macOS, SwiftUI menu-bar, built with `swiftc` + libsodium) — runs a
   LAN WebSocket server *and* a relay client, decrypts, shows the notifications.
 - **relay** (Cloudflare Worker + Durable Object) — one DO per pairing-id; forwards opaque
-  blobs from the phone to the Mac's socket. Never decrypts.
+  blobs between phone and Mac in **both** directions (sockets/POSTs carry a `role`/`to`
+  tag, default `mac`). Never decrypts.
+
+## Clipboard sync
+- **Mac → phone:** the Mac watches its pasteboard and auto-pushes each copy (skipping
+  concealed/password items) to every paired phone — LAN + relay (`?to=phone`), so it
+  works off-Wi-Fi. The phone writes it to its clipboard.
+- **Phone → Mac:** Android forbids background clipboard reads, so the phone pushes via
+  the **share sheet** ("Mac Bridge" share target); the Mac writes it to the pasteboard.
+- An echo guard on both ends (remember the last clip written from a received message;
+  the Mac also rebaselines its pasteboard change-count) prevents sync loops.
 
 ## End-to-end encryption
 - NaCl **secretbox** (XSalsa20-Poly1305). Wire format: `base64(nonce[24] || mac+cipher)`.

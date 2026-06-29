@@ -4,12 +4,23 @@
 
 <h1 align="center">Android &lt;&gt; Mac Bridge</h1>
 
-<p align="center">Your Android notifications &amp; OTPs, on your Mac — wherever you are.</p>
+<p align="center">Your Android notifications, OTPs &amp; clipboard, on your Mac — wherever you are.</p>
 
 ---
 
-Pair once by scanning a QR, and your phone's texts and **OTPs** show up on your Mac.
-Same Wi-Fi or anywhere over the internet. End-to-end encrypted.
+Pair once by scanning a QR, and your phone and Mac stay in sync. Same Wi-Fi or anywhere
+over the internet. End-to-end encrypted.
+
+## Features
+
+- **Notifications & texts** — your phone's notifications mirror to the Mac, grouped into
+  **SMS** and **Apps** tabs.
+- **OTPs** — one-time codes are detected and surfaced; click to copy.
+- **Clipboard sync** — copy on the Mac and it auto-lands on the phone; share text from the
+  phone (**Share → Mac Bridge**) and it lands on the Mac. Passwords (concealed clipboard)
+  are skipped.
+- **Anywhere** — same Wi-Fi goes direct (fast); off-Wi-Fi rides an encrypted relay.
+- **Multi-device** — pair several phones / Macs at once.
 
 ## Download
 
@@ -27,6 +38,9 @@ Same Wi-Fi or anywhere over the internet. End-to-end encrypted.
 3. On the phone, open **Mac Bridge** → **Scan QR to pair**.
 
 That's it. Notifications appear on your Mac; click to copy an OTP.
+
+**Clipboard:** copying on the Mac auto-sends to the phone. To go the other way, select
+text on the phone → **Share** → **Mac Bridge**.
 
 ## Private by design
 

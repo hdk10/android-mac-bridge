@@ -11,8 +11,8 @@ android {
         applicationId = "com.lattiq.androidbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
 
         // MUST match TOKEN in mac/bridge.py
         buildConfigField("String", "BRIDGE_TOKEN", "\"change-me-shared-secret\"")

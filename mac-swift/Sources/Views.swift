@@ -20,7 +20,7 @@ struct BoltBadge: View {
     }
 }
 
-enum NotifTab: Hashable { case sms, apps }
+enum NotifTab: Hashable { case sms, apps, clip }
 
 struct ContentView: View {
     @EnvironmentObject var core: BridgeCore
@@ -34,15 +34,18 @@ struct ContentView: View {
             } else {
                 Header()
                 Divider()
-                if core.recent.isEmpty {
+                Picker("", selection: $tab) {
+                    Text("SMS").tag(NotifTab.sms)
+                    Text("Apps").tag(NotifTab.apps)
+                    Text("Clipboard").tag(NotifTab.clip)
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .padding(.horizontal, 12).padding(.top, 10)
+                if tab == .clip {
+                    ClipList()
+                } else if core.recent.isEmpty {
                     EmptyState()
                 } else {
-                    Picker("", selection: $tab) {
-                        Text("SMS").tag(NotifTab.sms)
-                        Text("Apps").tag(NotifTab.apps)
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
-                    .padding(.horizontal, 12).padding(.top, 10)
                     NotifList(tab: tab)
                 }
                 Divider()
@@ -170,6 +173,95 @@ private struct NotifList: View {
                 .frame(maxHeight: 380)
             }
         }
+    }
+}
+
+// MARK: - Clipboard tab
+
+private struct ClipList: View {
+    @EnvironmentObject var core: BridgeCore
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                Toggle(isOn: Binding(
+                    get: { core.clipAutoPush },
+                    set: { core.setClipAutoPush($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Auto-sync clipboard").font(.subheadline.weight(.semibold))
+                        Text("Copy on this Mac → your phone").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch).tint(brand)
+                .padding(12)
+                .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
+
+                Button { core.sendClipboardNow() } label: {
+                    Label("Send clipboard to phone now", systemImage: "arrow.up.doc.on.clipboard")
+                        .font(.callout.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(brand.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(brand)
+                }
+                .buttonStyle(.plain)
+
+                if core.clips.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 26)).foregroundStyle(.tertiary)
+                        Text("No clipboard items yet")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 30).frame(maxWidth: .infinity)
+                } else {
+                    ForEach(core.clips) { ClipCard(item: $0) }
+                }
+            }
+            .padding(12)
+        }
+        .frame(maxHeight: 380)
+    }
+}
+
+private struct ClipCard: View {
+    @EnvironmentObject var core: BridgeCore
+    let item: ClipItem
+    @State private var copied = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7).fill(.quaternary).frame(width: 30, height: 30)
+                Image(systemName: "doc.on.clipboard").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.dname).font(.subheadline.weight(.semibold))
+                Text(item.text).font(.callout).lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Text(item.date, format: .dateTime.hour().minute())
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer(minLength: 8)
+                    Button { core.copy(item.text); flash() } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .foregroundStyle(copied ? brand : .secondary)
+                    }
+                    .buttonStyle(.plain).help("Copy").font(.system(size: 13))
+                }
+                .padding(.top, 1)
+            }
+        }
+        .padding(12)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
+    }
+
+    private func flash() {
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
     }
 }
 

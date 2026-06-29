@@ -42,6 +42,21 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Share-sheet target: send selected text from any app to the paired Mac -->
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:label="Mac Bridge"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".NotificationListener"
             android:exported="false"

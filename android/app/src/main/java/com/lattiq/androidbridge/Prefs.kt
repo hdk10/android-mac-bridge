@@ -35,6 +35,10 @@ object Prefs {
     fun paused(c: Context): Boolean = sp(c).getBoolean("paused", false)
     fun setPaused(c: Context, v: Boolean) = sp(c).edit().putBoolean("paused", v).apply()
 
+    /** Last clipboard text received from a Mac (for the home-screen card). */
+    fun lastClip(c: Context): String? = sp(c).getString("last_clip", null)?.takeIf { it.isNotEmpty() }
+    fun setLastClip(c: Context, v: String) = sp(c).edit().putString("last_clip", v).apply()
+
     fun deviceId(c: Context): String {
         var id = sp(c).getString("device_id", "") ?: ""
         if (id.isEmpty()) { id = UUID.randomUUID().toString().take(12); sp(c).edit().putString("device_id", id).apply() }

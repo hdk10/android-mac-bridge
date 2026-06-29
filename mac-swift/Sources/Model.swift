@@ -34,6 +34,15 @@ struct NotifItem: Identifiable {
     ]
 }
 
+/// One clipboard text synced from a phone, shown in the Clipboard tab.
+struct ClipItem: Identifiable {
+    let id: String
+    let text: String
+    let dname: String       // source device's display name
+    let date: Date
+    let source: String      // "LAN" | "Relay"
+}
+
 /// Hint-gated OTP extraction (defensive — the phone already sends `otp`).
 enum OTP {
     private static let hints = ["otp", "code", "verification", "verify",

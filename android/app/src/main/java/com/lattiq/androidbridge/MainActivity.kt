@@ -51,7 +51,12 @@ class MainActivity : ComponentActivity() {
 }
 
 private data class MacRow(val mac: Mac, val lan: Boolean)
-private data class UiState(val macs: List<MacRow>, val paused: Boolean, val notifAccess: Boolean) {
+private data class UiState(
+    val macs: List<MacRow>,
+    val paused: Boolean,
+    val notifAccess: Boolean,
+    val lastClip: String?,
+) {
     val paired get() = macs.isNotEmpty()
 }
 
@@ -59,6 +64,7 @@ private fun readUi(c: Context) = UiState(
     macs = Prefs.macs(c).map { MacRow(it, Links.isConnected(it.room)) },
     paused = Prefs.paused(c),
     notifAccess = notifAccessGranted(c),
+    lastClip = Prefs.lastClip(c),
 )
 
 private fun notifAccessGranted(c: Context): Boolean {
@@ -100,6 +106,7 @@ private fun HomeScreen() {
             if (ui.paired) {
                 MacsCard(ui, onRemove = { removing = it })
                 ForwardToggle(ui.paused) { Prefs.setPaused(ctx, !ui.paused); refresh() }
+                ClipboardCard(ui.lastClip)
             } else {
                 PairHero { scan.launch(Intent(ctx, ScannerActivity::class.java)) }
             }
@@ -143,7 +150,8 @@ private fun HomeScreen() {
             text = { Text("This phone stops sending to it. You can pair again by scanning its QR.") },
             confirmButton = {
                 TextButton(onClick = {
-                    sendBye(ctx, mac); Prefs.removeMac(ctx, mac.id); Links.configure(Prefs.macs(ctx))
+                    sendBye(ctx, mac); Prefs.removeMac(ctx, mac.id)
+                    Links.configure(Prefs.macs(ctx)); RelayClient.configureListen(Prefs.macs(ctx))
                     removing = null; refresh()
                 }) { Text("Unpair", color = MaterialTheme.colorScheme.error) }
             },
@@ -252,6 +260,28 @@ private fun ForwardToggle(paused: Boolean, onToggle: () -> Unit) {
             Text("Forward notifications", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Switch(checked = !paused, onCheckedChange = { onToggle() },
                 colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Brand, checkedBorderColor = Brand))
+        }
+    }
+}
+
+@Composable
+private fun ClipboardCard(lastClip: String?) {
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.ContentPaste, null, tint = Brand, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Clipboard sync is on", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    lastClip?.let { "Last from Mac: $it" }
+                        ?: "Share text to “Mac Bridge” to send it to your Mac",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

@@ -38,5 +38,52 @@ Encoding: one JSON object per WebSocket text message.
   `otp, code, verification, verify, password, passcode, 2fa, one-time, otp:`
 - Prevents copying random 6-digit numbers (order totals, phone numbers) as OTPs.
 
+## Clipboard sync (v2)
+
+A `clip` message carries clipboard text in either direction, using the **same**
+secretbox envelope and per-pairing key as notifications.
+
+```json
+{
+  "type":  "clip",
+  "clip":  "the copied text",
+  "id":    "uuid",
+  "did":   "<sender device id>",
+  "dname": "<sender device name>",
+  "time":  1750000000000
+}
+```
+
+| field   | type   | notes                                                        |
+|---------|--------|--------------------------------------------------------------|
+| `type`  | string | `"clip"`.                                                    |
+| `clip`  | string | UTF-8 clipboard text (rides in `clip`, not `text`).          |
+| `id`    | string | message id — receivers de-dupe by it (LAN + relay dual-send).|
+| `did`/`dname` | string | sender identity (Mac id/name, or phone id/name).       |
+
+- **Mac → phone:** the Mac auto-pushes on every copy (a pasteboard-change poller),
+  skipping concealed/transient pasteboard items (passwords). Sent over LAN to every
+  paired phone **and** via the relay (`?to=phone`) so it works off-Wi-Fi.
+- **Phone → Mac:** the phone has no background clipboard read (Android OS restriction),
+  so it pushes via the **share sheet** ("Mac Bridge" share target) — sent over LAN +
+  relay just like a notification. The Mac writes it to the pasteboard.
+- **Echo guard (both sides):** the value last written to the local clipboard from a
+  received `clip` is remembered; a copy equal to it is not re-sent. The Mac also
+  rebaselines its pasteboard change-count on a programmatic write so the poller does
+  not bounce it back.
+
+## Relay direction (v2)
+
+The relay is bidirectional. Sockets and POSTs carry a role/target, both defaulting to
+`mac` for v1 back-compat:
+
+- `GET  /pair/:id/listen?role=phone|mac`  — subscribe; socket is tagged with `role` (default `mac`).
+- `POST /pair/:id/notify?to=phone|mac`    — forward the blob only to sockets tagged `to` (default `mac`).
+
+So the phone's existing notification POST (no `?to`) still reaches the Mac, and a new
+`?to=phone` POST from the Mac reaches the phone's `?role=phone` socket — never echoing
+back to the sender's own role.
+
 ## Versioning
-Add `"v": 1` field in v2 once the schema changes. v1 messages omit it; treat missing `v` as 1.
+`v2` adds the `clip` message and the relay `role`/`to` params; both are back-compatible
+(missing `role`/`to` ⇒ `mac`). v1 messages omit any `v` field; treat missing `v` as 1.

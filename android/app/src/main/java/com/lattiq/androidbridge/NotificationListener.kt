@@ -1,6 +1,9 @@
 package com.lattiq.androidbridge
 
 import android.app.Notification
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -21,7 +24,9 @@ class NotificationListener : NotificationListenerService() {
     private val heartbeat = object : Runnable {
         override fun run() {
             val ctx = this@NotificationListener
-            Links.configure(Prefs.macs(ctx))   // open/refresh links to every paired Mac
+            val macs = Prefs.macs(ctx)
+            Links.configure(macs)              // open/refresh LAN links to every paired Mac
+            RelayClient.configureListen(macs)  // open/refresh relay receive sockets (off-LAN)
             if (Prefs.isPaired(ctx)) {
                 val ping = JSONObject().apply {
                     put("type", "ping")
@@ -36,7 +41,9 @@ class NotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
         Discovery.start(applicationContext)
         Links.configure(Prefs.macs(this))
+        RelayClient.configureListen(Prefs.macs(this))
         Links.onTextMessage = { room, text -> handleFromMac(room, text) }
+        RelayClient.onTextMessage = { room, text -> handleFromMac(room, text) }
         hb.removeCallbacks(heartbeat); hb.post(heartbeat)
     }
 
@@ -44,6 +51,8 @@ class NotificationListener : NotificationListenerService() {
         Discovery.stop()
         hb.removeCallbacks(heartbeat)
         Links.onTextMessage = null
+        RelayClient.onTextMessage = null
+        RelayClient.closeAllListen()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -77,9 +86,29 @@ class NotificationListener : NotificationListenerService() {
         val mac = Prefs.macs(this).firstOrNull { it.room == room } ?: return
         val json = Crypto.decrypt(mac.key, blob) ?: return
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
-        if (o.optString("type") == "open") {
-            val notifKey = o.optString("key"); val pkg = o.optString("app")
-            hb.post { openOnPhone(notifKey, pkg) }
+        when (o.optString("type")) {
+            "open" -> {
+                val notifKey = o.optString("key"); val pkg = o.optString("app")
+                hb.post { openOnPhone(notifKey, pkg) }
+            }
+            "clip" -> {
+                val clip = o.optString("clip")
+                if (clip.isEmpty()) return
+                if (clip == lastAppliedClip) return   // echo-guard: don't re-apply our own value
+                hb.post { applyClip(clip) }
+            }
+        }
+    }
+
+    /** Write Mac-sent text to the phone clipboard (main thread). Silent — Android shows its own chip. */
+    private fun applyClip(clip: String) {
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Mac Bridge", clip))
+            lastAppliedClip = clip
+            Prefs.setLastClip(this, clip)
+        } catch (e: Throwable) {
+            Log.e(TAG, "applyClip failed", e)
         }
     }
 
@@ -111,5 +140,7 @@ class NotificationListener : NotificationListenerService() {
     companion object {
         const val TAG = "ABridge"
         private val iconCache = HashMap<String, String>()
+        /** Last clip we wrote to the phone clipboard — guards against re-applying the same value. */
+        @Volatile var lastAppliedClip: String? = null
     }
 }
