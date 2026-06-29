@@ -20,6 +20,10 @@ mac-swift/.build/
 # misc
 .DS_Store
 
+# internal role/project memory — local only, never publish
+memory/
+.claude/
+
 # packaged downloads (keep these)
 !dist/MacBridge.apk
 !dist/AndroidBridge.dmg
