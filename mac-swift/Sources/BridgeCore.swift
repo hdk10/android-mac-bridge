@@ -39,7 +39,7 @@ final class BridgeCore: ObservableObject {
     private let bonjour = Bonjour()
     private var seen = Set<String>()
     private var seenOrder: [String] = []
-    private let presenceTimeout: TimeInterval = 90   // > 2 missed 30s heartbeats
+    private let presenceTimeout: TimeInterval = 180  // > 2 missed beats (30s on LAN, 60s off-LAN)
 
     // Clipboard sync state.
     private var macId = UUID().uuidString            // stable id for this Mac (persisted via clipsync.json)

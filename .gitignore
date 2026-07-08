@@ -12,10 +12,14 @@ android/.idea/
 android/*.iml
 *.apk
 *.keystore
+# release signing secrets — NEVER commit
+android/release.keystore
+android/keystore.properties
 
 # Swift Mac app
 mac-swift/build/
 mac-swift/.build/
+mac-swift/.libsodium/
 
 # misc
 .DS_Store
