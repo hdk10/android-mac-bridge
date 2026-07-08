@@ -1,14 +1,20 @@
-# android-bridge wire protocol (v1)
+# android-bridge wire protocol
 
 Transport: WebSocket. Mac = server (`ws://<mac-ip>:8765`). Phone = client, connects out.
 
-Encoding: one JSON object per WebSocket text message.
+Encoding: one JSON object per WebSocket text message. **Every message is NaCl-secretbox
+encrypted** with the per-pairing key exchanged in the QR (see "Encryption" below); the JSON
+shown here is the *plaintext* inside that envelope. There is no shared-secret token — the
+secretbox key IS the authenticator (a message that doesn't decrypt is dropped).
+
+> **Note:** v1 used a plaintext `token` field for auth. That is gone — the current apps
+> authenticate solely via the secretbox key. Any lingering `token`/`BRIDGE_TOKEN` reference
+> is dead and ignored.
 
 ## Phone → Mac: notification
 
 ```json
 {
-  "token": "change-me-shared-secret",
   "app":   "com.google.android.apps.messaging",
   "title": "VM-HDFCBK",
   "text":  "123456 is your OTP for login. Valid 10 min.",
@@ -19,7 +25,6 @@ Encoding: one JSON object per WebSocket text message.
 
 | field   | type            | notes                                                        |
 |---------|-----------------|--------------------------------------------------------------|
-| `token` | string          | shared secret. Mac drops messages whose token mismatches.    |
 | `app`   | string          | Android package name that posted the notification.           |
 | `title` | string          | notification title (may be empty).                           |
 | `text`  | string          | notification body (may be empty).                            |
@@ -27,7 +32,7 @@ Encoding: one JSON object per WebSocket text message.
 | `time`  | number          | epoch millis on phone.                                       |
 
 ## Mac behaviour
-1. Reject message if `token` != configured token.
+1. Reject the message if it fails to decrypt/authenticate under the pairing key.
 2. `otp` = message `otp`, else re-run extraction on `text` then `title` (defensive).
 3. If `otp` present → copy to clipboard (`pyperclip`) + post notification titled with the OTP.
 4. Else → post a plain mirror notification.

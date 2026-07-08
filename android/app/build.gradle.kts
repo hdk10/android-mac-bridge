@@ -1,21 +1,48 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+// Release signing config lives in keystore.properties (gitignored) so the private
+// keystore + passwords never enter git. Copy keystore.properties.example to
+// keystore.properties and fill it in, or run ./make-release-key.sh to generate one.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
 android {
-    namespace = "com.lattiq.androidbridge"
+    namespace = "com.androidbridge"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.lattiq.androidbridge"
+        applicationId = "com.androidbridge"
         minSdk = 26
         targetSdk = 34
         versionCode = 2
         versionName = "0.2"
+    }
 
-        // MUST match TOKEN in mac/bridge.py
-        buildConfigField("String", "BRIDGE_TOKEN", "\"change-me-shared-secret\"")
+    signingConfigs {
+        if (keystoreProps.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            // Use the real release key when keystore.properties is present;
+            // otherwise fall back so a plain `assembleRelease` still builds locally.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
     }
 
     buildFeatures {

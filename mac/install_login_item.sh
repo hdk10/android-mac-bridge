@@ -3,7 +3,7 @@
 # Idempotent. Run: ./install_login_item.sh   (uninstall: ./install_login_item.sh uninstall)
 set -euo pipefail
 
-LABEL="com.lattiq.androidbridge"
+LABEL="com.androidbridge"
 MACDIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$MACDIR/venv/bin/python"
 BRIDGE="$MACDIR/bridge.py"

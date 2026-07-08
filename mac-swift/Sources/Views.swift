@@ -1,6 +1,6 @@
 import SwiftUI
 
-private let brand = Color(red: 0.086, green: 0.612, blue: 0.463)   // LattIQ green
+private let brand = Color(red: 0.086, green: 0.612, blue: 0.463)   // brand green
 
 /// Green gradient rounded-square badge with the white bolt.horizontal.fill — matches the app icon.
 struct BoltBadge: View {
@@ -195,7 +195,7 @@ private struct ClipList: View {
                 }
                 .toggleStyle(.switch).tint(brand)
                 .padding(12)
-                .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
 
                 Button { core.sendClipboardNow() } label: {
@@ -255,7 +255,7 @@ private struct ClipCard: View {
             }
         }
         .padding(12)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
     }
 
@@ -321,7 +321,7 @@ private struct NotifCard: View {
             }
         }
         .padding(12)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
     }
 
