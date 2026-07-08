@@ -97,11 +97,21 @@ export class Room {
     return new Response("not found", { status: 404 });
   }
 
-  // --- WebSocket Hibernation handlers (Mac → relay direction) ---
+  // --- WebSocket Hibernation handlers ---
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
-    // Mac sends "ping" as a keepalive; reply so it can detect a dead relay.
+    // "ping" is a text keepalive; reply so the sender can detect a dead relay.
     if (msg === "ping") {
       try { ws.send("pong"); } catch { /* ignore */ }
+      return;
+    }
+    // Any other frame is an (opaque, E2E-encrypted) payload sent up a socket —
+    // used by the phone's low-cost presence heartbeat. Forward it to the sockets
+    // of the OPPOSITE role, exactly like a POST /notify would (sender never gets
+    // its own message back). WebSocket messages bill at 20:1 vs a POST request.
+    const from = (this.ctx.getTags(ws)[0] as Role | undefined) ?? "mac";
+    const target: Role = from === "phone" ? "mac" : "phone";
+    for (const peer of this.ctx.getWebSockets(target)) {
+      try { peer.send(msg); } catch { /* dead socket */ }
     }
   }
 

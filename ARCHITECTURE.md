@@ -42,8 +42,12 @@ through a Cloudflare relay that only ever sees ciphertext.
   current LAN IP, so a DHCP/router IP change doesn't require re-pairing.
 
 ## Presence
-- The phone sends an encrypted **heartbeat every 30s**. The Mac shows **Connected** only while
-  it has heard from the phone within ~90s.
+- The phone sends an encrypted **heartbeat**: every 30s over the LAN (no relay traffic when the
+  LAN socket is up), or every 60s over the relay when off-LAN. The off-LAN beat rides the phone's
+  already-open relay socket (cheap 20:1 WebSocket billing, no Worker request), falling back to a
+  POST if that socket isn't ready — so presence is never less reliable than a plain POST. The Mac
+  shows **Connected** while it has heard from the phone within ~180s. Data (notifications, clips)
+  always dual-sends over LAN **and** the relay, independent of the heartbeat.
 - On **unpair**, the phone sends a `bye`; the Mac drops presence immediately.
 
 ## Pairing flow

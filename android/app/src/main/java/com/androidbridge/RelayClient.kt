@@ -83,6 +83,17 @@ object RelayClient {
     }
 
     /**
+     * Send a blob UP the already-open relay-listen socket for this room. The relay
+     * forwards it to the paired Mac (opposite role). Used only for the presence
+     * heartbeat: it's ~20x cheaper than a POST and adds no Worker request. Returns
+     * false if the socket isn't ready — the caller then falls back to post().
+     */
+    fun sendOverListen(room: String, blob: String): Boolean {
+        val ws = listens[room]?.ws ?: return false
+        return runCatching { ws.send(blob) }.getOrDefault(false)
+    }
+
+    /**
      * Fire-and-forget. MUST be async: onNotificationPosted runs on the main thread,
      * and a synchronous OkHttp call there throws NetworkOnMainThreadException.
      */

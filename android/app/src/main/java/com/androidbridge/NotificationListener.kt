@@ -32,7 +32,7 @@ class NotificationListener : NotificationListenerService() {
                     put("type", "ping")
                     put("did", Prefs.deviceId(ctx)); put("dname", Prefs.deviceName(ctx))
                 }
-                Sender.broadcast(ctx, ping.toString())
+                Sender.heartbeat(ctx, ping.toString())
             }
             hb.postDelayed(this, 30_000)
         }

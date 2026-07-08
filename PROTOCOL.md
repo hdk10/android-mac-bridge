@@ -89,6 +89,19 @@ So the phone's existing notification POST (no `?to`) still reaches the Mac, and 
 `?to=phone` POST from the Mac reaches the phone's `?role=phone` socket — never echoing
 back to the sender's own role.
 
+### Sending a payload *up* a listen socket (presence heartbeat)
+
+A client may also send an encrypted blob **up its own `/listen` socket** instead of a
+POST. The relay forwards it to the sockets of the opposite role (same targeting as a
+POST, sender never gets its own frame back). The reserved text `"ping"` is still a
+keepalive (replied with `"pong"`) and is never forwarded.
+
+This is used only for the phone's **presence heartbeat** when off-LAN: it rides the
+already-open socket, so it costs no extra request and bills at Cloudflare's 20:1
+WebSocket-message rate. Data (notifications, clips) still uses the dual-send POST path
+for reliability. Heartbeat cadence: LAN 30s (over LAN, no relay), off-LAN 60s; the Mac
+holds a phone "present" for 180s.
+
 ## Versioning
 `v2` adds the `clip` message and the relay `role`/`to` params; both are back-compatible
 (missing `role`/`to` ⇒ `mac`). v1 messages omit any `v` field; treat missing `v` as 1.
